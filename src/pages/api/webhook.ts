@@ -32,7 +32,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       console.log(webhookData, 'Received data');
 
-      const token = await getAsset(webhookData.events.nft.nfts[0].mint);
+      const nftEvent = webhookData[0].events.compressed[0];
+      const mintAddress = nftEvent.nft.nfts[0].mint;
+
+      const token = await getAsset(mintAddress);
 
       const response = await fetch(webhook, {
         method: 'POST',
@@ -41,14 +44,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           content: null,
           embeds: [{
             title: `${token.content.metadata.name} has sold!`,
-            url: `https://solscan.io/token/${webhookData.events.nft.nfts[0].mint}`,
+            url: `https://solscan.io/token/${mintAddress}`,
             color: 16486972,
             fields: [
               { name: " ", value: " " },
-              { name: ":moneybag:  Sale Price", value: `**${(webhookData.events.nft.amount / 1000000000).toFixed(2)} SOL**`, inline: true },
-              { name: ":date:  Sale Date", value: `<t:${webhookData.timestamp}:R>`, inline: true },
-              { name: "Buyer", value: `${webhookData.events.nft.buyer.slice(0, 4)}..${webhookData.events.nft.buyer.slice(-4)}`, inline: true },
-              { name: "Seller", value: `${webhookData.events.nft.seller.slice(0, 4)}..${webhookData.events.nft.seller.slice(-4)}`, inline: true }
+              { name: ":moneybag:  Sale Price", value: `**${(nftEvent.amount / 1000000000).toFixed(2)} SOL**`, inline: true },
+              { name: ":date:  Sale Date", value: `<t:${webhookData[0].timestamp}:R>`, inline: true },
+              { name: "Buyer", value: `${nftEvent.buyer.slice(0, 4)}..${nftEvent.buyer.slice(-4)}`, inline: true },
+              { name: "Seller", value: `${nftEvent.seller.slice(0, 4)}..${nftEvent.seller.slice(-4)}`, inline: true }
             ],
             image: { url: token.content.files[0].uri },
             timestamp: new Date().toISOString(),
