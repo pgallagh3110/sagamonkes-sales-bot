@@ -109,6 +109,7 @@ export default async function handler(
       const { buyer, seller, nft_address: mintAddress, price: amount } = actionInfo;
 
       const token = await getAsset(mintAddress);
+      console.log('token', token);
 
       const formattedDate = formatDate(parsed.result.timestamp);
 
