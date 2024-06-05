@@ -33,3 +33,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ngrok
+ngrok.exe
+
+#old files
+webhook2nd.ts
+webhook3.ts
