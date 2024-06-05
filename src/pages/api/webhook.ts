@@ -72,7 +72,7 @@ export default async function handler(
       // console.log('Received data:', webhookData);
 
       // Extract the first signature
-      const firstSignature = webhookData.signatures;
+      const firstSignature = webhookData.signature;
       if (!firstSignature) {
         console.error('No signatures found in the data:', webhookData);
         return res.status(400).json({ error: 'No signatures found' });
