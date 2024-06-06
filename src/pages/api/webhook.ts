@@ -90,7 +90,7 @@ export default async function handler(
 
       // Get parsed transaction
       const parsed = await getParsed(firstSignature, NETWORK);
-      // console.log('Parsed transaction:', parsed);
+      console.log('Parsed transaction:', JSON.stringify(parsed, null, 2));
 
       // Accessing the first action's info
       const actionInfo = parsed.result.actions[0]?.info;
@@ -100,11 +100,11 @@ export default async function handler(
       }
       // console.log('Action info:', actionInfo);
 
-      if (parsed.result.actions[0]?.type !== 'COMPRESSED_NFT_SALE') {
-        console.error('No COMPRESSED_NFT_SALE found in the parsed data');
+      if (parsed.result.actions[0]?.type !== 'COMPRESSED_NFT_SALE' && parsed.result.actions[0]?.type !== 'COMPRESSED_NFT_TAKE_BID') {
+        console.error('No COMPRESSED_NFT_SALE or COMPRESSED_NFT_TAKE_BID found in the parsed data');
         return res.status(400).json({ error: 'No action info found' });
       }
-      console.log('COMPRESSED_NFT_SALE');
+      console.log('COMPRESSED_NFT_SALE or COMPRESSED_NFT_TAKE_BID found');
 
       const { buyer, seller, nft_address: mintAddress, price: amount } = actionInfo;
 
