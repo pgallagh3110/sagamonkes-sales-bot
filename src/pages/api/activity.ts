@@ -59,7 +59,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         postedToDiscord = true;
 
         // Add delay to avoid rate limiting
-        await delay(1000); // 1 second delay
+        await delay(500); // 1 second delay
       }
     }
 
