@@ -1,5 +1,8 @@
 import { NextApiRequest, NextApiResponse } from "next";
 
+export const maxDuration = 30; // 30 seconds
+export const dynamic = 'force-dynamic';
+
 const collection = process.env.COLLECTION;
 
 const MAGICEDEN_API_URL = `https://api-mainnet.magiceden.dev/v2/collections/${collection}/activities?offset=0&limit=20`;
