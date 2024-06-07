@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 const collectionName = process .env.COLLECTION;
 const dbCollection = 'sales'
 
-const MAGICEDEN_API_URL = `https://api-mainnet.magiceden.dev/v2/collections/${collectionName}/activities?offset=0&limit=20`;
+const MAGICEDEN_API_URL = `https://api-mainnet.magiceden.dev/v2/collections/${collectionName}/activities?offset=0&limit=100`;
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
