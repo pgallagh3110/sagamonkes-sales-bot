@@ -74,10 +74,19 @@ async function sendToDiscord(activity: any) {
     return;
   }
 
-  const { tokenMint, price, buyer, seller, image, blockTime } = activity;
+  const { tokenMint, price, buyer, seller, image, blockTime, source} = activity;
 
   const formattedDate = new Date(blockTime * 1000).toLocaleDateString("en-US");
   const monkeNumber = image.match(/(\d+)\.png$/)?.[1];
+
+  let marketplace;
+  if (source.toLowerCase().includes('magic')) {
+    marketplace = 'Magic Eden';
+  } else if (source.toLowerCase().includes('tensor')) {
+    marketplace = 'Tensor';
+  } else {
+    marketplace = 'Other';
+  }
 
   const embed = {
     content: null,
@@ -89,11 +98,14 @@ async function sendToDiscord(activity: any) {
         { name: ":moneybag:  Sale Price", value: `**${price.toFixed(2)} SOL**`, inline: true },
         { name: ":date:  Sale Date", value: formattedDate, inline: true },
         { name: "Buyer", value: `${buyer}`, inline: false },
-        { name: "Seller", value: `${seller}`, inline: false }
+        { name: "Seller", value: `${seller}`, inline: false },
+        // { name: "Marketplace", value: `Sold via ${marketplace}`, inline: false }
       ],
       image: { url: image },
       timestamp: new Date().toISOString(),
-      footer: { text: "MonkeSales", icon_url: "https://media.discordapp.net/attachments/1058514014092668958/1248039086930006108/logo.png?ex=66623679&is=6660e4f9&hm=f68083d86a2856a80cb4d04bdb71e2361f39bf5cf136dd293b24346a8b051827&=&format=webp&quality=lossless&width=487&height=487" }
+      footer: { 
+        text: `MonkeSales: Sold via ${marketplace}`,
+        icon_url: "https://media.discordapp.net/attachments/1058514014092668958/1248039086930006108/logo.png?ex=66623679&is=6660e4f9&hm=f68083d86a2856a80cb4d04bdb71e2361f39bf5cf136dd293b24346a8b051827&=&format=webp&quality=lossless&width=487&height=487" },
     }],
   };
 
