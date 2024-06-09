@@ -28,7 +28,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const embedFields = topSales.map((sale, index) => ({
 
       name: `${index + 1}`,
-      value: `[Saga Monke #${sale.image.match(/(\d+)\.png$/)?.[1]}](https://solscan.io/token/${sale.tokenMint})\nPrice: ${sale.price.toFixed(2)} SOL`,
+      value: `[Saga Monke #${sale.image.match(/(\d+)\.png$/)?.[1]}](https://solana.fm/address/${sale.tokenMint})\nPrice: ${sale.price.toFixed(2)} ◎`,
       inline: true
     }));
 

@@ -95,7 +95,7 @@ async function sendToDiscord(activity: any) {
       url: `https://solscan.io/token/${tokenMint}`,
       color: 16486972,
       fields: [
-        { name: ":moneybag:  Sale Price", value: `**${price.toFixed(2)} SOL**`, inline: true },
+        { name: ":moneybag:  Sale Price", value: `${price.toFixed(2)} ◎`, inline: true },
         { name: ":date:  Sale Date", value: formattedDate, inline: true },
         { name: "Buyer", value: `${buyer}`, inline: false },
         { name: "Seller", value: `${seller}`, inline: false },
