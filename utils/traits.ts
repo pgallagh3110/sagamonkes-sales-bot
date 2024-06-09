@@ -107,7 +107,7 @@ const traitData: { items: Trait[] } = {
           {
             "value": "Drywall Missiles",
             "count": 1471,
-            "role": "1249092201300889722"
+            "role": ""
           },
           {
             "value": "Glare",
@@ -137,7 +137,7 @@ const traitData: { items: Trait[] } = {
           {
             "value": "Mocha",
             "count": 1897,
-            "role": "1249092124763488296"
+            "role": ""
           },
           {
             "value": "Dark",
