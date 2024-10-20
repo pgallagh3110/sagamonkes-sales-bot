@@ -126,14 +126,14 @@ async function sendToDiscord(activity: any) {
   const {
     nft_id,
     price,
-    seller_address,
+    seller,  // Corrected seller
     permalink,
-    event_timestamp,
     marketplace,
     nft_details,
   } = activity;
 
-  const formattedDate = new Date(event_timestamp).toLocaleDateString("en-US");
+  // Format the event timestamp correctly from blockTime
+  const formattedDate = new Date(activity.blockTime * 1000).toLocaleDateString("en-US");
 
   // Traits (from metadata.json)
   const traits = Object.entries(nft_details.attributes)
@@ -170,7 +170,7 @@ async function sendToDiscord(activity: any) {
             inline: true,
           },
           { name: ":date: Change Date", value: formattedDate, inline: true },
-          { name: "Seller", value: `${seller_address}`, inline: false },
+          { name: "Seller", value: `${seller}`, inline: false },  // Corrected seller
           { name: "Attributes", value: traits, inline: false },
         ],
         image: { url: activity.image },  // Use the image provided by Magic Eden
