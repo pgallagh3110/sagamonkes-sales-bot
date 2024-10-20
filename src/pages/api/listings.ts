@@ -7,7 +7,7 @@ export const maxDuration = 60; // 60 seconds
 export const dynamic = "force-dynamic";
 
 const dbCollection = "listings";
-const collectionName = process .env.COLLECTION;
+const collectionName = process.env.COLLECTION;
 
 const MAGICEDEN_API_URL = `https://api-mainnet.magiceden.dev/v2/collections/${collectionName}/activities`;
 
@@ -24,26 +24,10 @@ interface Activity {
   event_timestamp: string;
   seller_address: string;
   price: number;
-  marketplace_id: string;
+  marketplace: string;
   permalink: string;
   createdAt: Date;
   nft_details?: any;
-}
-
-interface Attribute {
-  trait_type: string;
-  value: string;
-}
-
-interface TraitValue {
-  value: string;
-  count: number;
-  role?: string;
-}
-
-interface Trait {
-  trait_type: string;
-  values: TraitValue[];
 }
 
 export default async function handler(
@@ -75,7 +59,7 @@ export default async function handler(
       }
 
       const data = await response.json();
-      activities = data; // Magic Eden returns an array of activities
+      activities = data;
       console.log("Fetched Activities:", activities);
     }
 
@@ -98,7 +82,7 @@ export default async function handler(
             event_timestamp: new Date(activity.blockTime * 1000).toISOString(),  // Convert blockTime to timestamp
             seller_address: activity.seller,
             price: activity.priceInfo.solPrice.rawAmount / 10 ** 9,  // Convert price from rawAmount
-            marketplace_id: activity.source,
+            marketplace: activity.source,  // Use source instead of marketplace_id
             permalink: `https://magiceden.io/item-details/${nftAddress}`,  // Generate permalink
             createdAt: new Date(),
           };
@@ -112,7 +96,7 @@ export default async function handler(
           }
 
           // Merge the NFT details with newActivity
-          newActivity.nft_details = nftDetails;  // Add this line
+          newActivity.nft_details = nftDetails;
 
           await collection.insertOne(newActivity);
 
@@ -145,20 +129,11 @@ async function sendToDiscord(activity: any) {
     seller_address,
     permalink,
     event_timestamp,
-    marketplace_id,
-    nft_details,  // NFT details from metadata.json
+    marketplace,
+    nft_details,
   } = activity;
 
   const formattedDate = new Date(event_timestamp).toLocaleDateString("en-US");
-
-  let marketplace;
-  if (marketplace_id.toLowerCase().includes("tensor")) {
-    marketplace = "Tensor";
-  } else if (marketplace_id.toLowerCase().includes("magic")) {
-    marketplace = "MagicEden";
-  } else {
-    marketplace = "Other";
-  }
 
   // Traits (from metadata.json)
   const traits = Object.entries(nft_details.attributes)
@@ -167,15 +142,15 @@ async function sendToDiscord(activity: any) {
 
   // Look up roles associated with attributes
   const roles = Object.entries(nft_details.attributes).map(([trait_type, value]) => {
-    const trait = traitData.items.find((item: Trait) => item.trait_type === trait_type);
+    const trait = traitData.items.find((item) => item.trait_type === trait_type);
     if (trait) {
-      const traitValue = trait.values.find((val: TraitValue) => val.value === value);
+      const traitValue = trait.values.find((val) => val.value === value);
       if (traitValue && traitValue.role) {
         return `<@&${traitValue.role}>`;  // Role mention format
       }
     }
     return null;
-  }).filter((role: string | null): role is string => role !== null);
+  }).filter((role) => role !== null);
 
   const roleMentions = roles.join(" ");
 
@@ -190,7 +165,7 @@ async function sendToDiscord(activity: any) {
         color: 8388736,
         fields: [
           {
-            name: ":moneybag: New Price",
+            name: ":moneybag: New Listing",
             value: `${price.toFixed(2)} ◎`,
             inline: true,
           },
