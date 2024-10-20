@@ -24,7 +24,7 @@ interface Activity {
   event_timestamp: string;
   seller_address: string;
   price: number;
-  marketplace: string;  // Keep this field for passing the source directly
+  marketplace: string;
   permalink: string;
   createdAt: Date;
   nft_details?: any;
@@ -75,7 +75,6 @@ export default async function handler(
         const nftAddress = activity.tokenMint;
 
         if (!existingActivity) {
-          // Use activity.source as the marketplace
           const newActivity: Activity = {
             id: activity.signature,
             nft_id: nftAddress,
@@ -83,7 +82,7 @@ export default async function handler(
             event_timestamp: new Date(activity.blockTime * 1000).toISOString(),  // Convert blockTime to timestamp
             seller_address: activity.seller,
             price: activity.priceInfo.solPrice.rawAmount / 10 ** 9,  // Convert price from rawAmount
-            marketplace: activity.source,  // Use source directly for the marketplace
+            marketplace: activity.source,  // Use source for marketplace (we will normalize this later)
             permalink: `https://magiceden.io/item-details/${nftAddress}`,  // Generate permalink
             createdAt: new Date(),
           };
@@ -116,6 +115,17 @@ export default async function handler(
   }
 }
 
+// Function to normalize marketplace names
+function normalizeMarketplace(source: string): string {
+  if (source.toLowerCase().includes("magiceden")) {
+    return "MagicEden";
+  } else if (source.toLowerCase().includes("tensor")) {
+    return "Tensor";
+  } else {
+    return "Other";  // Fallback for other marketplaces
+  }
+}
+
 async function sendToDiscord(activity: any) {
   const webhook = process.env.DISCORD_WEBHOOK_2;
 
@@ -136,6 +146,9 @@ async function sendToDiscord(activity: any) {
   // Format the event timestamp correctly from blockTime
   const formattedDate = new Date(activity.blockTime * 1000).toLocaleDateString("en-US");
 
+  // Normalize the marketplace name
+  const normalizedMarketplace = normalizeMarketplace(source);
+
   // Traits (from metadata.json)
   const traits = Object.entries(nft_details.attributes)
     .map(([trait_type, value]) => `**${trait_type}**: ${value}`)
@@ -155,7 +168,7 @@ async function sendToDiscord(activity: any) {
 
   const roleMentions = roles.join(" ");
 
-  const content = roleMentions ? `${roleMentions}, your followed trait has been listed on ${source}` : null;
+  const content = roleMentions ? `${roleMentions}, your followed trait has been listed on ${normalizedMarketplace}` : null;
 
   const embed = {
     content: content,
@@ -177,7 +190,7 @@ async function sendToDiscord(activity: any) {
         image: { url: activity.image },  // Use the image provided by Magic Eden
         timestamp: new Date().toISOString(),
         footer: {
-          text: `Listed on ${source}`,  // Directly use source (e.g., "magiceden_v3" or "tensor_cnft")
+          text: `Listed on ${normalizedMarketplace}`,  // Use normalized marketplace name
           icon_url:
             "https://media.discordapp.net/attachments/1058514014092668958/1248039086930006108/logo.png?format=webp&quality=lossless&width=487&height=487",
         },
