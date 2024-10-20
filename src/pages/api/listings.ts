@@ -7,9 +7,9 @@ export const maxDuration = 60; // 60 seconds
 export const dynamic = "force-dynamic";
 
 const dbCollection = "listings";
-const collection = process.env.COLLECTION_NFT;
+const collectionName = process .env.COLLECTION;
 
-const MAGICEDEN_API_URL = `https://api-mainnet.magiceden.dev/v2/collections/${collection}/activities`;
+const MAGICEDEN_API_URL = `https://api-mainnet.magiceden.dev/v2/collections/${collectionName}/activities`;
 
 const headers = new Headers({
   accept: "application/json",
