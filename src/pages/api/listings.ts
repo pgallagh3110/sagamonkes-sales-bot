@@ -69,44 +69,54 @@ export default async function handler(
     }
 
     for (const activity of activities) {
-      if (activity.type === "list") {
-        const existingActivity = await collection.findOne({ id: activity.signature });
+  if (activity.type === "list") {
+    const existingActivity = await collection.findOne({ id: activity.signature });
 
-        const nftAddress = activity.tokenMint;
+    const nftAddress = activity.tokenMint;
 
-        if (!existingActivity) {
-          const newActivity: Activity = {
-            id: activity.signature,
-            nft_id: nftAddress,
-            collection_id: activity.collectionSymbol,
-            event_timestamp: new Date(activity.blockTime * 1000).toISOString(),  // Convert blockTime to timestamp
-            seller_address: activity.seller,
-            price: activity.priceInfo.solPrice.rawAmount / 10 ** 9,  // Convert price from rawAmount
-            marketplace: activity.source,  // Use source instead of marketplace_id
-            permalink: `https://magiceden.io/item-details/${nftAddress}`,  // Generate permalink
-            createdAt: new Date(),
-          };
-
-          // Get NFT details from metadata.json based on mint address
-          const nftDetails = metadata.find((nft) => nft.mint === nftAddress);
-
-          if (!nftDetails) {
-            console.error(`Metadata for NFT with address ${nftAddress} not found`);
-            continue;  // Skip if no metadata is found
-          }
-
-          // Merge the NFT details with newActivity
-          newActivity.nft_details = nftDetails;
-
-          await collection.insertOne(newActivity);
-
-          // Send to Discord
-          await sendToDiscord({ ...activity, nft_details: nftDetails }); // Pass the details to the Discord function
-
-          await delay(500); // 0.5 second delay
-        }
+    if (!existingActivity) {
+      // Normalize marketplace names
+      let marketplace;
+      if (activity.source.toLowerCase().includes("tensor")) {
+        marketplace = "tensor";
+      } else if (activity.source.toLowerCase().includes("magic")) {
+        marketplace = "magiceden";
+      } else {
+        marketplace = "other";
       }
+
+      const newActivity: Activity = {
+        id: activity.signature,
+        nft_id: nftAddress,
+        collection_id: activity.collectionSymbol,
+        event_timestamp: new Date(activity.blockTime * 1000).toISOString(),  // Convert blockTime to timestamp
+        seller_address: activity.seller,
+        price: activity.priceInfo.solPrice.rawAmount / 10 ** 9,  // Convert price from rawAmount
+        marketplace: marketplace,  // Include marketplace explicitly
+        permalink: `https://magiceden.io/item-details/${nftAddress}`,  // Generate permalink
+        createdAt: new Date(),
+      };
+
+      // Get NFT details from metadata.json based on mint address
+      const nftDetails = metadata.find((nft) => nft.mint === nftAddress);
+
+      if (!nftDetails) {
+        console.error(`Metadata for NFT with address ${nftAddress} not found`);
+        continue;  // Skip if no metadata is found
+      }
+
+      // Merge the NFT details with newActivity
+      newActivity.nft_details = nftDetails;
+
+      await collection.insertOne(newActivity);
+
+      // Ensure marketplace is passed into sendToDiscord
+      await sendToDiscord({ ...activity, marketplace, nftDetails }); // Pass the marketplace and details
+
+      await delay(500); // 0.5 second delay
     }
+  }
+}
 
     res.status(200).json({ message: "Success" });
   } catch (error) {
@@ -126,21 +136,18 @@ async function sendToDiscord(activity: any) {
   const {
     nft_id,
     price,
-    seller,  // Corrected seller
+    seller,  
     permalink,
-    marketplace,
+    marketplace,  // Now passed explicitly
     nft_details,
   } = activity;
 
-  // Format the event timestamp correctly from blockTime
   const formattedDate = new Date(activity.blockTime * 1000).toLocaleDateString("en-US");
 
-  // Traits (from metadata.json)
   const traits = Object.entries(nft_details.attributes)
     .map(([trait_type, value]) => `**${trait_type}**: ${value}`)
     .join("\n");
 
-  // Look up roles associated with attributes
   const roles = Object.entries(nft_details.attributes).map(([trait_type, value]) => {
     const trait = traitData.items.find((item) => item.trait_type === trait_type);
     if (trait) {
@@ -169,14 +176,14 @@ async function sendToDiscord(activity: any) {
             value: `${price.toFixed(2)} ◎`,
             inline: true,
           },
-          { name: ":date: Change Date", value: formattedDate, inline: true },
-          { name: "Seller", value: `${seller}`, inline: false },  // Corrected seller
+          { name: ":date: ", value: formattedDate, inline: true },
+          { name: "Seller", value: `${seller}`, inline: false },
           { name: "Attributes", value: traits, inline: false },
         ],
-        image: { url: activity.image },  // Use the image provided by Magic Eden
+        image: { url: activity.image },
         timestamp: new Date().toISOString(),
         footer: {
-          text: `Listed on ${marketplace}`,
+          text: `Listed on ${marketplace}`,  // Marketplace will no longer be undefined
           icon_url:
             "https://media.discordapp.net/attachments/1058514014092668958/1248039086930006108/logo.png?format=webp&quality=lossless&width=487&height=487",
         },
