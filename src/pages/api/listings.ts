@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from "next";
 import { getClient } from "../../../utils/mongoConnect";
+import metadata from "../../../utils/metadata.json";  // Import metadata.json
 import traitData from "../../../utils/traits";
 
 export const maxDuration = 60; // 60 seconds
@@ -7,13 +8,11 @@ export const dynamic = "force-dynamic";
 
 const dbCollection = "listings";
 const collection = process.env.COLLECTION_NFT;
-const apiKey = "sagamonkes_sk_9rqtif6tj0zq310u07t0gg72jrg5fl1a";
 
-const SIMPLEHASH_API_URL = `https://api.simplehash.com/api/v0/nfts/listing_events/collection/${collection}?limit=50`;
+const MAGICEDEN_API_URL = `https://api-mainnet.magiceden.dev/v2/collections/${collection}/activities`;
 
 const headers = new Headers({
   accept: "application/json",
-  "X-API-KEY": apiKey || "",
 });
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -28,7 +27,7 @@ interface Activity {
   marketplace_id: string;
   permalink: string;
   createdAt: Date;
-  nft_details?: any; // Add the nft_details property as optional
+  nft_details?: any;
 }
 
 interface Attribute {
@@ -47,12 +46,6 @@ interface Trait {
   values: TraitValue[];
 }
 
-interface NftDetails {
-  extra_metadata: {
-    attributes: Attribute[];
-  };
-}
-
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
@@ -68,7 +61,7 @@ export default async function handler(
       activities = req.body;
       console.log("Test Activities:", activities);
     } else {
-      const response = await fetch(SIMPLEHASH_API_URL, {
+      const response = await fetch(MAGICEDEN_API_URL, {
         method: "GET",
         headers: headers,
       });
@@ -82,7 +75,7 @@ export default async function handler(
       }
 
       const data = await response.json();
-      activities = data.events;
+      activities = data; // Magic Eden returns an array of activities
       console.log("Fetched Activities:", activities);
     }
 
@@ -92,51 +85,38 @@ export default async function handler(
     }
 
     for (const activity of activities) {
-      if (activity.event_type === "listing_added") {
-        const existingActivity = await collection.findOne({ id: activity.id });
+      if (activity.type === "list") {
+        const existingActivity = await collection.findOne({ id: activity.signature });
 
-        const nftAddress = activity.nft_id.slice(7);
+        const nftAddress = activity.tokenMint;
 
         if (!existingActivity) {
           const newActivity: Activity = {
-            id: activity.id,
+            id: activity.signature,
             nft_id: nftAddress,
-            collection_id: activity.collection_id,
-            event_timestamp: activity.event_timestamp,
-            seller_address: activity.seller_address,
-            price: activity.price / 10 ** activity.payment_token.decimals,
-            marketplace_id: activity.marketplace_id,
-            permalink: activity.permalink,
+            collection_id: activity.collectionSymbol,
+            event_timestamp: new Date(activity.blockTime * 1000).toISOString(),  // Convert blockTime to timestamp
+            seller_address: activity.seller,
+            price: activity.priceInfo.solPrice.rawAmount / 10 ** 9,  // Convert price from rawAmount
+            marketplace_id: activity.source,
+            permalink: `https://magiceden.io/item-details/${nftAddress}`,  // Generate permalink
             createdAt: new Date(),
           };
 
-          ///get nft details//
-          const SIMPLEHASH_API_URL_NFT = `https://api.simplehash.com/api/v0/nfts/solana/${nftAddress}`;
-          const response2 = await fetch(SIMPLEHASH_API_URL_NFT, {
-            method: "GET",
-            headers: headers,
-          });
+          // Get NFT details from metadata.json based on mint address
+          const nftDetails = metadata.find((nft) => nft.mint === nftAddress);
 
-          if (!response2.ok) {
-            const errorText = await response2.text();
-            console.error(
-              "Error fetching nftDetails:",
-              response2.status,
-              errorText
-            );
-            return res
-              .status(response2.status)
-              .json({ error: "Failed to fetch nftDetails" });
+          if (!nftDetails) {
+            console.error(`Metadata for NFT with address ${nftAddress} not found`);
+            continue;  // Skip if no metadata is found
           }
 
-          const nftDetails = await response2.json();
-          console.log("Fetched NFT Details:", nftDetails);
-
           // Merge the NFT details with newActivity
-          newActivity.nft_details = nftDetails; // Add this line
+          newActivity.nft_details = nftDetails;  // Add this line
 
           await collection.insertOne(newActivity);
 
+          // Send to Discord
           await sendToDiscord({ ...activity, nft_details: nftDetails }); // Pass the details to the Discord function
 
           await delay(500); // 0.5 second delay
@@ -166,7 +146,7 @@ async function sendToDiscord(activity: any) {
     permalink,
     event_timestamp,
     marketplace_id,
-    nft_details, // Add this line to destructure nft_details
+    nft_details,  // NFT details from metadata.json
   } = activity;
 
   const formattedDate = new Date(event_timestamp).toLocaleDateString("en-US");
@@ -180,20 +160,18 @@ async function sendToDiscord(activity: any) {
     marketplace = "Other";
   }
 
-  //traits
-  const traits = nft_details.extra_metadata.attributes
-    .map((attr: { trait_type: string; value: string }) => {
-      return `**${attr.trait_type}**: ${attr.value}`;
-    })
+  // Traits (from metadata.json)
+  const traits = Object.entries(nft_details.attributes)
+    .map(([trait_type, value]) => `**${trait_type}**: ${value}`)
     .join("\n");
 
   // Look up roles associated with attributes
-  const roles = nft_details.extra_metadata.attributes.map((attr: Attribute) => {
-    const trait = traitData.items.find((item: Trait) => item.trait_type === attr.trait_type);
+  const roles = Object.entries(nft_details.attributes).map(([trait_type, value]) => {
+    const trait = traitData.items.find((item: Trait) => item.trait_type === trait_type);
     if (trait) {
-      const value = trait.values.find((val: TraitValue) => val.value === attr.value);
-      if (value && value.role) {
-        return `<@&${value.role}>`;
+      const traitValue = trait.values.find((val: TraitValue) => val.value === value);
+      if (traitValue && traitValue.role) {
+        return `<@&${traitValue.role}>`;  // Role mention format
       }
     }
     return null;
@@ -202,33 +180,30 @@ async function sendToDiscord(activity: any) {
   const roleMentions = roles.join(" ");
 
   const content = roleMentions ? `${roleMentions}, your followed trait has been listed on ${marketplace}` : null;
-  
+
   const embed = {
-    content: content, // Use the conditional content
+    content: content,
     embeds: [
       {
-        title: `${nft_details.contract.name} has been listed!`,
+        title: `${nft_details.name} has been listed!`,
         url: permalink,
         color: 8388736,
         fields: [
           {
             name: ":moneybag: New Price",
-            value: `${(price / 10 ** activity.payment_token.decimals).toFixed(
-              2
-            )} ◎`,
+            value: `${price.toFixed(2)} ◎`,
             inline: true,
           },
           { name: ":date: Change Date", value: formattedDate, inline: true },
           { name: "Seller", value: `${seller_address}`, inline: false },
           { name: "Attributes", value: traits, inline: false },
-          // Add more fields from nft_details if needed
         ],
-        image: { url: nft_details.extra_metadata.image_original_url },
+        image: { url: activity.image },  // Use the image provided by Magic Eden
         timestamp: new Date().toISOString(),
         footer: {
           text: `Listed on ${marketplace}`,
           icon_url:
-            "https://media.discordapp.net/attachments/1058514014092668958/1248039086930006108/logo.png?ex=66623679&is=6660e4f9&hm=f68083d86a2856a80cb4d04bdb71e2361f39bf5cf136dd293b24346a8b051827&=&format=webp&quality=lossless&width=487&height=487",
+            "https://media.discordapp.net/attachments/1058514014092668958/1248039086930006108/logo.png?format=webp&quality=lossless&width=487&height=487",
         },
       },
     ],
