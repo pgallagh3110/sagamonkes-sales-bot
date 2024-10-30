@@ -68,13 +68,40 @@ export default async function handler(
       return res.status(400).json({ error: "Invalid data format" });
     }
 
-    for (const activity of activities) {
-      if (activity.type === "list") {
-        const existingActivity = await collection.findOne({ id: activity.signature });
+    // THIS BIT STARTS
+    // for (const activity of activities) {
+    //   if (activity.type === "list") {
+    //     const existingActivity = await collection.findOne({ id: activity.signature });
 
-        const nftAddress = activity.tokenMint;
+    //     const nftAddress = activity.tokenMint;
 
-        if (!existingActivity) {
+    //     if (!existingActivity) {
+    //THIS BIT END
+
+      for (const activity of activities) {
+        if (activity.type === "list") {
+          const nftAddress = activity.tokenMint;
+          const sellerAddress = activity.seller;
+  
+          // Fetch the last 10 records with the same tokenMint
+          const recentListings = await collection
+            .find({ nft_id: nftAddress })
+            .sort({ createdAt: -1 })
+            .limit(10)
+            .toArray();
+  
+          // Check if the same tokenMint has been listed by the same seller
+          const isDuplicateListing = recentListings.some(
+            (listing) => listing.seller_address === sellerAddress
+          );
+  
+          // Skip sending if the same tokenMint was listed by the same seller recently
+          if (isDuplicateListing) {
+            console.log(`Skipping duplicate listing for ${nftAddress} by ${sellerAddress}`);
+            continue;
+          }
+  
+          // Prepare the new activity object for the database
           const newActivity: Activity = {
             id: activity.signature,
             nft_id: nftAddress,
@@ -106,7 +133,6 @@ export default async function handler(
           await delay(500); // 0.5 second delay
         }
       }
-    }
 
     res.status(200).json({ message: "Success" });
   } catch (error) {
