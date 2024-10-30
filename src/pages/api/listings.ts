@@ -68,87 +68,66 @@ export default async function handler(
       return res.status(400).json({ error: "Invalid data format" });
     }
 
-    // THIS BIT STARTS
-    // for (const activity of activities) {
-    //   if (activity.type === "list") {
-    //     const existingActivity = await collection.findOne({ id: activity.signature });
+    for (const activity of activities) {
+      if (activity.type === "list") {
+        const nftAddress = activity.tokenMint;
+        const sellerAddress = activity.seller;
 
-    //     const nftAddress = activity.tokenMint;
+        // Fetch the last 10 records with the same tokenMint
+        const recentListings = await collection
+          .find({ nft_id: nftAddress })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .toArray();
 
-    //     if (!existingActivity) {
-    //THIS BIT END
+        // Check if the same tokenMint has been listed by the same seller
+        const isDuplicateListing = recentListings.some(
+          (listing) => listing.seller_address === sellerAddress
+        );
 
-      for (const activity of activities) {
-        if (activity.type === "list") {
-          const nftAddress = activity.tokenMint;
-          const sellerAddress = activity.seller;
-  
-          // Fetch the last 10 records with the same tokenMint
-          const recentListings = await collection
-            .find({ nft_id: nftAddress })
-            .sort({ createdAt: -1 })
-            .limit(10)
-            .toArray();
-  
-          // Check if the same tokenMint has been listed by the same seller
-          const isDuplicateListing = recentListings.some(
-            (listing) => listing.seller_address === sellerAddress
-          );
-  
-          // Skip sending if the same tokenMint was listed by the same seller recently
-          if (isDuplicateListing) {
-            console.log(`Skipping duplicate listing for ${nftAddress} by ${sellerAddress}`);
-            continue;
-          }
-  
-          // Prepare the new activity object for the database
-          const newActivity: Activity = {
-            id: activity.signature,
-            nft_id: nftAddress,
-            collection_id: activity.collectionSymbol,
-            event_timestamp: new Date(activity.blockTime * 1000).toISOString(),  // Convert blockTime to timestamp
-            seller_address: activity.seller,
-            price: activity.priceInfo.solPrice.rawAmount / 10 ** 9,  // Convert price from rawAmount
-            marketplace: activity.source,  // Use source for marketplace (we will normalize this later)
-            permalink: `https://magiceden.io/item-details/${nftAddress}`,  // Generate permalink
-            createdAt: new Date(),
-          };
-
-          // Get NFT details from metadata.json based on mint address
-          const nftDetails = metadata.find((nft) => nft.mint === nftAddress);
-
-          if (!nftDetails) {
-            console.error(`Metadata for NFT with address ${nftAddress} not found`);
-            continue;  // Skip if no metadata is found
-          }
-
-          // Merge the NFT details with newActivity
-          newActivity.nft_details = nftDetails;
-
-          await collection.insertOne(newActivity);
-
-          // Send to Discord
-          await sendToDiscord({ ...activity, nft_details: nftDetails }); // Pass the details to the Discord function
-
-          await delay(500); // 0.5 second delay
+        // Skip sending if the same tokenMint was listed by the same seller recently
+        if (isDuplicateListing) {
+          console.log(`Skipping duplicate listing for ${nftAddress} by ${sellerAddress}`);
+          continue;
         }
+
+        // Prepare the new activity object for the database
+        const newActivity: Activity = {
+          id: activity.signature,
+          nft_id: nftAddress,
+          collection_id: activity.collectionSymbol,
+          event_timestamp: new Date(activity.blockTime * 1000).toISOString(),
+          seller_address: sellerAddress,
+          price: activity.priceInfo.solPrice.rawAmount / 10 ** 9,
+          marketplace: activity.source,
+          permalink: `https://magiceden.io/item-details/${nftAddress}`,
+          createdAt: new Date(),
+        };
+
+        // Get NFT details from metadata.json based on mint address
+        const nftDetails = metadata.find((nft) => nft.mint === nftAddress);
+
+        if (!nftDetails) {
+          console.error(`Metadata for NFT with address ${nftAddress} not found`);
+          continue;  // Skip if no metadata is found
+        }
+
+        newActivity.nft_details = nftDetails;
+
+        // Insert the new activity into the database
+        await collection.insertOne(newActivity);
+
+        // Send to Discord
+        await sendToDiscord({ ...activity, nft_details: nftDetails });
+
+        await delay(500); // 0.5-second delay
       }
+    }
 
     res.status(200).json({ message: "Success" });
   } catch (error) {
     console.error("Error fetching activities or sending to Discord:", error);
     res.status(500).json({ error: "Internal Server Error" });
-  }
-}
-
-// Function to normalize marketplace names
-function normalizeMarketplace(source: string): string {
-  if (source.toLowerCase().includes("magiceden")) {
-    return "MagicEden";
-  } else if (source.toLowerCase().includes("tensor")) {
-    return "Tensor";
-  } else {
-    return "Other";  // Fallback for other marketplaces
   }
 }
 
@@ -163,38 +142,36 @@ async function sendToDiscord(activity: any) {
   const {
     nft_id,
     price,
-    seller,  // Corrected seller
+    seller_address,
     permalink,
-    source,  // Use source instead of marketplace
+    marketplace,
     nft_details,
   } = activity;
 
-  // Format the event timestamp correctly from blockTime
   const formattedDate = new Date(activity.blockTime * 1000).toLocaleDateString("en-US");
 
-  // Normalize the marketplace name
-  const normalizedMarketplace = normalizeMarketplace(source);
-
-  // Traits (from metadata.json)
   const traits = Object.entries(nft_details.attributes)
     .map(([trait_type, value]) => `**${trait_type}**: ${value}`)
     .join("\n");
 
-  // Look up roles associated with attributes
-  const roles = Object.entries(nft_details.attributes).map(([trait_type, value]) => {
-    const trait = traitData.items.find((item) => item.trait_type === trait_type);
-    if (trait) {
-      const traitValue = trait.values.find((val) => val.value === value);
-      if (traitValue && traitValue.role) {
-        return `<@&${traitValue.role}>`;  // Role mention format
+  const roles = Object.entries(nft_details.attributes)
+    .map(([trait_type, value]) => {
+      const trait = traitData.items.find((item) => item.trait_type === trait_type);
+      if (trait) {
+        const traitValue = trait.values.find((val) => val.value === value);
+        if (traitValue && traitValue.role) {
+          return `<@&${traitValue.role}>`;
+        }
       }
-    }
-    return null;
-  }).filter((role) => role !== null);
+      return null;
+    })
+    .filter((role) => role !== null);
 
   const roleMentions = roles.join(" ");
 
-  const content = roleMentions ? `${roleMentions}, your followed trait has been listed on ${normalizedMarketplace}` : null;
+  const content = roleMentions
+    ? `${roleMentions}, your followed trait has been listed on ${marketplace}`
+    : null;
 
   const embed = {
     content: content,
@@ -209,14 +186,14 @@ async function sendToDiscord(activity: any) {
             value: `${price.toFixed(2)} ◎`,
             inline: true,
           },
-          { name: ":date: ", value: formattedDate, inline: true },
-          { name: "Seller", value: `${seller}`, inline: false },  // Corrected seller
+          { name: ":date: Change Date", value: formattedDate, inline: true },
+          { name: "Seller", value: `${seller_address}`, inline: false },
           { name: "Attributes", value: traits, inline: false },
         ],
-        image: { url: activity.image },  // Use the image provided by Magic Eden
+        image: { url: activity.image },
         timestamp: new Date().toISOString(),
         footer: {
-          text: `Listed on ${normalizedMarketplace}`,  // Use normalized marketplace name
+          text: `Listed on ${marketplace}`,
           icon_url:
             "https://media.discordapp.net/attachments/1058514014092668958/1248039086930006108/logo.png?format=webp&quality=lossless&width=487&height=487",
         },
