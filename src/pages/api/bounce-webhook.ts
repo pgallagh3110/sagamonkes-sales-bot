@@ -188,9 +188,6 @@ export default async function handler(
     const caption = [
       `<b>${name} has been claimed!</b>`,
       ``,
-      `💰 Sale Price`,
-      `${priceSol} ◎`,
-      ``,
       `📅 Claim Date`,
       `${formattedDate}`,
       ``,
