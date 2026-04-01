@@ -146,47 +146,48 @@ export default async function handler(
 
     const tx = webhookData[0];
 
-    if (tx.type !== "NFT_SALE") {
-      console.log(`Skipping non-sale event: ${tx.type}`);
-      return res.status(200).json({ message: "Not a sale" });
+    if (tx.type !== "TRANSFER") {
+      console.log(`Skipping non-transfer event: ${tx.type}`);
+      return res.status(200).json({ message: "Not a transfer" });
     }
 
-    const nftEvent = tx.events?.nft;
-    if (!nftEvent) {
-      console.error("No nft event data:", tx);
-      return res.status(400).json({ error: "No NFT event data" });
+    // Find the NFT token transfer
+    const nftTransfer = (tx.tokenTransfers ?? []).find(
+      (t: any) => t.tokenAmount === 1
+    );
+    if (!nftTransfer) {
+      console.log("No NFT token transfer found, skipping");
+      return res.status(200).json({ message: "No NFT transfer" });
     }
 
-    const mint = nftEvent.nfts?.[0]?.mint;
-    if (!mint) {
-      return res.status(400).json({ error: "No mint address" });
-    }
-
-    const buyer: string = nftEvent.buyer ?? "";
-    const seller: string = nftEvent.seller ?? "";
-    const amount: number = nftEvent.amount ?? 0;
-    const source: string = nftEvent.source ?? tx.source ?? "UNKNOWN";
+    const mint: string = nftTransfer.mint;
+    const buyer: string = nftTransfer.toUserAccount ?? tx.feePayer ?? "";
     const timestamp: number = tx.timestamp ?? 0;
+
+    // Price = buyer's total SOL spent (nativeBalanceChange is negative for buyer)
+    const buyerAccountData = (tx.accountData ?? []).find(
+      (a: any) => a.account === (tx.feePayer ?? buyer)
+    );
+    const amount: number = buyerAccountData
+      ? Math.abs(buyerAccountData.nativeBalanceChange)
+      : 0;
     const priceSol = formatSol(amount);
 
     const asset = await getAsset(mint);
-    const name: string =
-      asset?.content?.metadata?.name ?? "Bounce NFT";
+    const name: string = asset?.content?.metadata?.name ?? "Bounce NFT";
     const imageUrl: string =
       asset?.content?.links?.image ??
       asset?.content?.files?.[0]?.cdn_uri ??
       asset?.content?.files?.[0]?.uri ??
       "";
 
-    console.log(`Sale: ${name} | ${priceSol} SOL | buyer ${buyer}`);
+    console.log(`Bounce transfer: ${name} | ${priceSol} SOL | minted to ${buyer}`);
 
     const caption = [
-      `🟣 <b>${name} has sold!</b>`,
+      `🟣 <b>${name} minted!</b>`,
       `💰 <b>${priceSol} SOL</b>`,
-      `🏪 ${source}`,
-      `🕐 <t:${timestamp}:R>` ,
-      `👤 Buyer: <code>${shorten(buyer)}</code>`,
-      `💼 Seller: <code>${shorten(seller)}</code>`,
+      `🕐 <t:${timestamp}:R>`,
+      `🎯 Minted to: <code>${shorten(buyer)}</code>`,
       `🔗 <a href="https://solscan.io/token/${mint}">View on Solscan</a>`,
     ].join("\n");
 
@@ -202,8 +203,8 @@ export default async function handler(
         imageUrl,
         priceSol,
         buyer,
-        seller,
-        source,
+        "",
+        "ORB",
         timestamp
       );
     }
