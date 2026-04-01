@@ -183,11 +183,20 @@ export default async function handler(
 
     console.log(`Bounce transfer: ${name} | ${priceSol} SOL | minted to ${buyer}`);
 
+    const formattedDate = new Date(timestamp * 1000).toLocaleDateString("en-US");
+
     const caption = [
-      `🟣 <b>${name} minted!</b>`,
-      `💰 <b>${priceSol} SOL</b>`,
-      `🕐 <t:${timestamp}:R>`,
-      `🎯 Minted to: <code>${shorten(buyer)}</code>`,
+      `<b>${name} has been claimed!</b>`,
+      ``,
+      `💰 Sale Price`,
+      `${priceSol} ◎`,
+      ``,
+      `📅 Claim Date`,
+      `${formattedDate}`,
+      ``,
+      `Claimed by`,
+      `${buyer}`,
+      ``,
       `🔗 <a href="https://solscan.io/token/${mint}">View on Solscan</a>`,
     ].join("\n");
 
