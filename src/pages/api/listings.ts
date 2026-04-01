@@ -140,14 +140,14 @@ async function sendToDiscord(activity: any) {
   }
 
   const {
-    nft_id,
+    tokenMint: nft_id,
     price,
-    seller_address,
-    permalink,
-    marketplace,
+    seller: seller_address,
+    source: marketplace,
     nft_details,
   } = activity;
 
+  const permalink = `https://magiceden.io/item-details/${nft_id}`;
   const formattedDate = new Date(activity.blockTime * 1000).toLocaleDateString("en-US");
 
   const traits = Object.entries(nft_details.attributes)
