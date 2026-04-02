@@ -2,26 +2,32 @@ import { NextApiRequest, NextApiResponse } from "next";
 
 const rpc = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_KEY}`;
 const MPL_CORE_PROGRAM = "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d";
+const BOUNCE_COLLECTION = "BNsdq1DkgB3PZAfHCZzCxSMuvzypvRKNz4ZA6mJFPmuK";
 const CREATE_V2_DISCRIMINATOR = 0x14; // decimal 20 — confirmed from on-chain tx
 
 const CACHE_DURATION = 20 * 1000;
 const requestCache: { [key: string]: number } = {};
 
-// Minimal base58 decode — returns first byte of decoded data
+// Base58 decode without BigInt — returns first byte of decoded data
 function base58FirstByte(s: string): number {
   const ALPHABET =
     "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-  let n = 0n;
+  // Accumulate in little-endian byte array
+  const bytes: number[] = [0];
   for (const c of s) {
-    n = n * 58n + BigInt(ALPHABET.indexOf(c));
+    let carry = ALPHABET.indexOf(c);
+    for (let i = 0; i < bytes.length; i++) {
+      carry += bytes[i] * 58;
+      bytes[i] = carry & 0xff;
+      carry >>= 8;
+    }
+    while (carry > 0) {
+      bytes.push(carry & 0xff);
+      carry >>= 8;
+    }
   }
-  if (n === 0n) return 0;
-  const bytes: number[] = [];
-  while (n > 0n) {
-    bytes.unshift(Number(n & 0xffn));
-    n >>= 8n;
-  }
-  return bytes[0];
+  // bytes is little-endian; most significant byte (= first decoded byte) is at the end
+  return bytes[bytes.length - 1];
 }
 
 const getAsset = async (mint: string) => {
@@ -134,11 +140,10 @@ export default async function handler(
     }
 
     const rawTx = webhookData[0];
-
-    // Raw webhook: signature is in transaction.signatures[0]
     const signature: string = rawTx.transaction?.signatures?.[0] ?? "";
+
     if (!signature) {
-      console.error("No signature in payload:", JSON.stringify(rawTx).slice(0, 200));
+      console.error("No signature in payload");
       return res.status(400).json({ error: "No signature found" });
     }
 
@@ -157,11 +162,17 @@ export default async function handler(
       return res.status(200).json({ message: "Transaction failed, skipping" });
     }
 
-    // Raw webhook format: accountKeys are pubkey strings, instruction accounts are indices
+    // Raw webhook: accountKeys are pubkey strings, instruction accounts are indices
     const accountKeys: string[] = rawTx.transaction.message.accountKeys;
     const instructions: any[] = rawTx.transaction.message.instructions;
 
-    // Find the MPL Core createV2 instruction
+    // Filter 1: collection address must appear in accountKeys (per Helius support advice)
+    if (!accountKeys.includes(BOUNCE_COLLECTION)) {
+      console.log("Not a Bounce collection tx, skipping:", signature.slice(0, 16));
+      return res.status(200).json({ message: "Not a Bounce collection tx" });
+    }
+
+    // Filter 2: find the MPL Core createV2 instruction (discriminator 0x14)
     const mplCoreIx = instructions.find((ix) => {
       if (accountKeys[ix.programIdIndex] !== MPL_CORE_PROGRAM) return false;
       try {
@@ -172,7 +183,7 @@ export default async function handler(
     });
 
     if (!mplCoreIx) {
-      console.log("No MPL Core createV2 found in tx:", signature.slice(0, 16));
+      console.log("No MPL Core createV2 found, skipping:", signature.slice(0, 16));
       return res.status(200).json({ message: "Not a Bounce mint" });
     }
 
