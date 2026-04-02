@@ -1,9 +1,28 @@
 import { NextApiRequest, NextApiResponse } from "next";
 
 const rpc = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_KEY}`;
+const MPL_CORE_PROGRAM = "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d";
+const CREATE_V2_DISCRIMINATOR = 0x14; // decimal 20 — confirmed from on-chain tx
 
 const CACHE_DURATION = 20 * 1000;
 const requestCache: { [key: string]: number } = {};
+
+// Minimal base58 decode — returns first byte of decoded data
+function base58FirstByte(s: string): number {
+  const ALPHABET =
+    "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let n = 0n;
+  for (const c of s) {
+    n = n * 58n + BigInt(ALPHABET.indexOf(c));
+  }
+  if (n === 0n) return 0;
+  const bytes: number[] = [];
+  while (n > 0n) {
+    bytes.unshift(Number(n & 0xffn));
+    n >>= 8n;
+  }
+  return bytes[0];
+}
 
 const getAsset = async (mint: string) => {
   const response = await fetch(rpc, {
@@ -22,10 +41,6 @@ const getAsset = async (mint: string) => {
 
 function shorten(addr: string): string {
   return `${addr.slice(0, 4)}..${addr.slice(-4)}`;
-}
-
-function formatSol(lamports: number): string {
-  return (lamports / 1_000_000_000).toFixed(3);
 }
 
 async function sendTelegram(imageUrl: string | null, caption: string) {
@@ -51,7 +66,6 @@ async function sendTelegram(imageUrl: string | null, caption: string) {
       }),
     });
     if (!res.ok) {
-      // Image URL may be broken — fall back to text
       console.warn("sendPhoto failed, falling back to sendMessage");
       await sendTelegramText(base, chatId, caption);
     }
@@ -73,35 +87,23 @@ async function sendDiscord(
   name: string,
   mint: string,
   imageUrl: string,
-  priceSol: string,
   buyer: string,
-  seller: string,
-  source: string,
   timestamp: number
 ) {
   const embed = {
     content: null,
     embeds: [
       {
-        title: `${name} has sold!`,
+        title: `${name} has been claimed!`,
         url: `https://solscan.io/token/${mint}`,
         color: 0x9b59b6,
         fields: [
-          { name: "💰 Sale Price", value: `**${priceSol} SOL**`, inline: true },
-          {
-            name: "📅 Sale Date",
-            value: `<t:${timestamp}:R>`,
-            inline: true,
-          },
-          { name: "Buyer", value: shorten(buyer), inline: true },
-          { name: "Seller", value: shorten(seller), inline: true },
-          { name: "Marketplace", value: source, inline: true },
+          { name: "📅 Claim Date", value: `<t:${timestamp}:R>`, inline: true },
+          { name: "Claimed by", value: shorten(buyer), inline: true },
         ],
         image: { url: imageUrl },
         timestamp: new Date().toISOString(),
-        footer: {
-          text: "BounceSales",
-        },
+        footer: { text: "BounceSales" },
       },
     ],
   };
@@ -127,53 +129,60 @@ export default async function handler(
 
   try {
     const webhookData = req.body;
+    if (!Array.isArray(webhookData) || webhookData.length === 0) {
+      return res.status(400).json({ error: "Invalid payload" });
+    }
 
-    const firstSignature = webhookData?.[0]?.signature;
-    if (!firstSignature) {
-      console.error("No signature in payload:", webhookData);
+    const rawTx = webhookData[0];
+
+    // Raw webhook: signature is in transaction.signatures[0]
+    const signature: string = rawTx.transaction?.signatures?.[0] ?? "";
+    if (!signature) {
+      console.error("No signature in payload:", JSON.stringify(rawTx).slice(0, 200));
       return res.status(400).json({ error: "No signature found" });
     }
 
     // Deduplicate
     if (
-      requestCache[firstSignature] &&
-      Date.now() - requestCache[firstSignature] < CACHE_DURATION
+      requestCache[signature] &&
+      Date.now() - requestCache[signature] < CACHE_DURATION
     ) {
-      console.log("Duplicate request ignored:", firstSignature);
+      console.log("Duplicate ignored:", signature.slice(0, 16));
       return res.status(200).json({ message: "Duplicate ignored" });
     }
-    requestCache[firstSignature] = Date.now();
+    requestCache[signature] = Date.now();
 
-    const tx = webhookData[0];
-
-    if (tx.type !== "TRANSFER") {
-      console.log(`Skipping non-transfer event: ${tx.type}`);
-      return res.status(200).json({ message: "Not a transfer" });
+    // Skip failed transactions
+    if (rawTx.meta?.err) {
+      return res.status(200).json({ message: "Transaction failed, skipping" });
     }
 
-    // Find the NFT token transfer
-    const nftTransfer = (tx.tokenTransfers ?? []).find(
-      (t: any) => t.tokenAmount === 1
-    );
-    if (!nftTransfer) {
-      console.log("No NFT token transfer found, skipping");
-      return res.status(200).json({ message: "No NFT transfer" });
+    // Raw webhook format: accountKeys are pubkey strings, instruction accounts are indices
+    const accountKeys: string[] = rawTx.transaction.message.accountKeys;
+    const instructions: any[] = rawTx.transaction.message.instructions;
+
+    // Find the MPL Core createV2 instruction
+    const mplCoreIx = instructions.find((ix) => {
+      if (accountKeys[ix.programIdIndex] !== MPL_CORE_PROGRAM) return false;
+      try {
+        return base58FirstByte(ix.data) === CREATE_V2_DISCRIMINATOR;
+      } catch {
+        return false;
+      }
+    });
+
+    if (!mplCoreIx) {
+      console.log("No MPL Core createV2 found in tx:", signature.slice(0, 16));
+      return res.status(200).json({ message: "Not a Bounce mint" });
     }
 
-    const mint: string = nftTransfer.mint;
-    const buyer: string = nftTransfer.toUserAccount ?? tx.feePayer ?? "";
-    const timestamp: number = tx.timestamp ?? 0;
+    // Asset = accounts[0] of the MPL Core instruction (index into accountKeys)
+    const assetAddress: string = accountKeys[mplCoreIx.accounts[0]];
+    // Buyer = fee payer = always accountKeys[0] in any Solana transaction
+    const buyer: string = accountKeys[0];
+    const timestamp: number = rawTx.blockTime ?? 0;
 
-    // Price = buyer's total SOL spent (nativeBalanceChange is negative for buyer)
-    const buyerAccountData = (tx.accountData ?? []).find(
-      (a: any) => a.account === (tx.feePayer ?? buyer)
-    );
-    const amount: number = buyerAccountData
-      ? Math.abs(buyerAccountData.nativeBalanceChange)
-      : 0;
-    const priceSol = formatSol(amount);
-
-    const asset = await getAsset(mint);
+    const asset = await getAsset(assetAddress);
     const name: string = asset?.content?.metadata?.name ?? "Bounce NFT";
     const imageUrl: string =
       asset?.content?.links?.image ??
@@ -181,7 +190,9 @@ export default async function handler(
       asset?.content?.files?.[0]?.uri ??
       "";
 
-    console.log(`Bounce transfer: ${name} | ${priceSol} SOL | minted to ${buyer}`);
+    console.log(
+      `Bounce mint: ${name} | asset: ${assetAddress} | buyer: ${shorten(buyer)}`
+    );
 
     const formattedDate = new Date(timestamp * 1000).toLocaleDateString("en-US");
 
@@ -194,25 +205,14 @@ export default async function handler(
       `Claimed by`,
       `${buyer}`,
       ``,
-      `🔗 <a href="https://solscan.io/token/${mint}">View on Solscan</a>`,
+      `🔗 <a href="https://solscan.io/token/${assetAddress}">View on Solscan</a>`,
     ].join("\n");
 
     await sendTelegram(imageUrl || null, caption);
 
-    // Also post to Discord if webhook is configured
     const discordWebhook = process.env.BOUNCE_DISCORD_WEBHOOK;
     if (discordWebhook && imageUrl) {
-      await sendDiscord(
-        discordWebhook,
-        name,
-        mint,
-        imageUrl,
-        priceSol,
-        buyer,
-        "",
-        "ORB",
-        timestamp
-      );
+      await sendDiscord(discordWebhook, name, assetAddress, imageUrl, buyer, timestamp);
     }
 
     return res.status(200).json({ message: "Success" });
