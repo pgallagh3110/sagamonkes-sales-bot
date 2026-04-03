@@ -1,8 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/topsales",
-      "schedule": "0 9 * * *"
+      "path": "/api/bounce-report",
+      "schedule": "0 */12 * * *"
     }
   ]
 }
