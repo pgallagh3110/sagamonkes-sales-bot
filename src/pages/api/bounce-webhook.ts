@@ -45,8 +45,12 @@ const getAsset = async (mint: string) => {
   return result;
 };
 
-function shorten(addr: string): string {
-  return `${addr.slice(0, 4)}..${addr.slice(-4)}`;
+function formatDate(timestamp: number): string {
+  const date = new Date(timestamp * 1000);
+  const month = date.getUTCMonth() + 1;
+  const day = date.getUTCDate();
+  const year = date.getUTCFullYear();
+  return `${month}/${day}/${year}`;
 }
 
 async function sendTelegram(imageUrl: string | null, caption: string) {
@@ -89,39 +93,46 @@ async function sendTelegramText(base: string, chatId: string, text: string) {
 }
 
 async function sendDiscord(
-  webhook: string,
+  webhookUrl: string,
   name: string,
   mint: string,
   imageUrl: string,
   buyer: string,
   timestamp: number
 ) {
+  const formattedDate = formatDate(timestamp);
+
   const embed = {
     content: null,
     embeds: [
       {
         title: `${name} has been claimed!`,
         url: `https://solscan.io/token/${mint}`,
-        color: 0x9b59b6,
+        color: 16486972,
         fields: [
-          { name: "📅 Claim Date", value: `<t:${timestamp}:R>`, inline: true },
-          { name: "Claimed by", value: shorten(buyer), inline: true },
+          { name: ":date:  Claim Date", value: formattedDate, inline: true },
+          { name: "Claimed by", value: buyer, inline: false },
         ],
         image: { url: imageUrl },
         timestamp: new Date().toISOString(),
-        footer: { text: "BounceSales" },
+        footer: {
+          text: "BounceSales",
+          icon_url:
+            "https://media.discordapp.net/attachments/1058514014092668958/1248039086930006108/logo.png?ex=66623679&is=6660e4f9&hm=f68083d86a2856a80cb4d04bdb71e2361f39bf5cf136dd293b24346a8b051827&=&format=webp&quality=lossless&width=487&height=487",
+        },
       },
     ],
   };
 
-  const res = await fetch(webhook, {
+  const res = await fetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(embed),
   });
 
   if (!res.ok) {
-    throw new Error(`Discord webhook error: ${res.statusText}`);
+    const body = await res.text();
+    throw new Error(`Discord webhook error: ${res.statusText} — ${body}`);
   }
 }
 
@@ -166,7 +177,7 @@ export default async function handler(
     const accountKeys: string[] = rawTx.transaction.message.accountKeys;
     const instructions: any[] = rawTx.transaction.message.instructions;
 
-    // Filter 1: collection address must appear in accountKeys (per Helius support advice)
+    // Filter 1: collection address must appear in accountKeys
     if (!accountKeys.includes(BOUNCE_COLLECTION)) {
       console.log("Not a Bounce collection tx, skipping:", signature.slice(0, 16));
       return res.status(200).json({ message: "Not a Bounce collection tx" });
@@ -202,7 +213,7 @@ export default async function handler(
       "";
 
     console.log(
-      `Bounce mint: ${name} | asset: ${assetAddress} | buyer: ${shorten(buyer)}`
+      `Bounce mint: ${name} | asset: ${assetAddress} | buyer: ${buyer}`
     );
 
     const formattedDate = new Date(timestamp * 1000).toLocaleDateString("en-US");
@@ -224,6 +235,8 @@ export default async function handler(
     const discordWebhook = process.env.BOUNCE_DISCORD_WEBHOOK;
     if (discordWebhook && imageUrl) {
       await sendDiscord(discordWebhook, name, assetAddress, imageUrl, buyer, timestamp);
+    } else if (!discordWebhook) {
+      console.warn("BOUNCE_DISCORD_WEBHOOK not set — skipping Discord");
     }
 
     return res.status(200).json({ message: "Success" });
