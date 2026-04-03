@@ -1,4 +1,5 @@
 import { NextApiRequest, NextApiResponse } from "next";
+import { getClient } from "../../../utils/mongoConnect";
 
 const rpc = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_KEY}`;
 const MPL_CORE_PROGRAM = "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d";
@@ -12,7 +13,6 @@ const requestCache: { [key: string]: number } = {};
 function base58FirstByte(s: string): number {
   const ALPHABET =
     "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-  // Accumulate in little-endian byte array
   const bytes: number[] = [0];
   for (const c of s) {
     let carry = ALPHABET.indexOf(c);
@@ -26,7 +26,6 @@ function base58FirstByte(s: string): number {
       carry >>= 8;
     }
   }
-  // bytes is little-endian; most significant byte (= first decoded byte) is at the end
   return bytes[bytes.length - 1];
 }
 
@@ -136,6 +135,38 @@ async function sendDiscord(
   }
 }
 
+async function storeMint(
+  signature: string,
+  name: string,
+  assetAddress: string,
+  buyer: string,
+  timestamp: number
+) {
+  try {
+    const client = await getClient();
+    const db = client.db();
+    const col = db.collection("bounce_mints");
+    // upsert by signature so restarts can't double-store
+    await col.updateOne(
+      { signature },
+      {
+        $setOnInsert: {
+          signature,
+          name,
+          assetAddress,
+          buyer,
+          blockTime: timestamp,
+          createdAt: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+  } catch (err) {
+    // Don't fail the whole request if DB write fails
+    console.error("Failed to store mint in MongoDB:", err);
+  }
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
@@ -173,7 +204,6 @@ export default async function handler(
       return res.status(200).json({ message: "Transaction failed, skipping" });
     }
 
-    // Raw webhook: accountKeys are pubkey strings, instruction accounts are indices
     const accountKeys: string[] = rawTx.transaction.message.accountKeys;
     const instructions: any[] = rawTx.transaction.message.instructions;
 
@@ -198,9 +228,7 @@ export default async function handler(
       return res.status(200).json({ message: "Not a Bounce mint" });
     }
 
-    // Asset = accounts[0] of the MPL Core instruction (index into accountKeys)
     const assetAddress: string = accountKeys[mplCoreIx.accounts[0]];
-    // Buyer = fee payer = always accountKeys[0] in any Solana transaction
     const buyer: string = accountKeys[0];
     const timestamp: number = rawTx.blockTime ?? 0;
 
@@ -212,9 +240,7 @@ export default async function handler(
       asset?.content?.files?.[0]?.uri ??
       "";
 
-    console.log(
-      `Bounce mint: ${name} | asset: ${assetAddress} | buyer: ${buyer}`
-    );
+    console.log(`Bounce mint: ${name} | asset: ${assetAddress} | buyer: ${buyer}`);
 
     const formattedDate = new Date(timestamp * 1000).toLocaleDateString("en-US");
 
@@ -230,14 +256,15 @@ export default async function handler(
       `🔗 <a href="https://solscan.io/token/${assetAddress}">View on Solscan</a>`,
     ].join("\n");
 
-    await sendTelegram(imageUrl || null, caption);
-
     const discordWebhook = process.env.BOUNCE_DISCORD_WEBHOOK;
-    if (discordWebhook && imageUrl) {
-      await sendDiscord(discordWebhook, name, assetAddress, imageUrl, buyer, timestamp);
-    } else if (!discordWebhook) {
-      console.warn("BOUNCE_DISCORD_WEBHOOK not set — skipping Discord");
-    }
+
+    await Promise.all([
+      sendTelegram(imageUrl || null, caption),
+      discordWebhook && imageUrl
+        ? sendDiscord(discordWebhook, name, assetAddress, imageUrl, buyer, timestamp)
+        : Promise.resolve(),
+      storeMint(signature, name, assetAddress, buyer, timestamp),
+    ]);
 
     return res.status(200).json({ message: "Success" });
   } catch (err) {
