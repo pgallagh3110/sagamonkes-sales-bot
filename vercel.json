@@ -1,8 +1,1 @@
-{
-  "crons": [
-    {
-      "path": "/api/bounce-report",
-      "schedule": "26 10,22 * * *"
-    }
-  ]
-}
+{}
