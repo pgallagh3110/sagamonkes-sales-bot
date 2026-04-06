@@ -6,9 +6,6 @@ const MPL_CORE_PROGRAM = "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d";
 const BOUNCE_COLLECTION = "BNsdq1DkgB3PZAfHCZzCxSMuvzypvRKNz4ZA6mJFPmuK";
 const CREATE_V2_DISCRIMINATOR = 0x14; // decimal 20 — confirmed from on-chain tx
 
-const CACHE_DURATION = 20 * 1000;
-const requestCache: { [key: string]: number } = {};
-
 // Base58 decode without BigInt — returns first byte of decoded data
 function base58FirstByte(s: string): number {
   const ALPHABET =
@@ -189,15 +186,15 @@ export default async function handler(
       return res.status(400).json({ error: "No signature found" });
     }
 
-    // Deduplicate
-    if (
-      requestCache[signature] &&
-      Date.now() - requestCache[signature] < CACHE_DURATION
-    ) {
-      console.log("Duplicate ignored:", signature.slice(0, 16));
+    // Deduplicate via MongoDB — works across serverless instances
+    const client = await getClient();
+    const db = client.db();
+    const col = db.collection("bounce_mints");
+    const existing = await col.findOne({ signature });
+    if (existing) {
+      console.log("Duplicate ignored (DB):", signature.slice(0, 16));
       return res.status(200).json({ message: "Duplicate ignored" });
     }
-    requestCache[signature] = Date.now();
 
     // Skip failed transactions
     if (rawTx.meta?.err) {
